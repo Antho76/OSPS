@@ -2,13 +2,23 @@ import multiprocessing
 import time
 import os
 
-def server(shared_value, fifo_path, event, sdfifo):
-    print(f"Server process ID: {os.getpid()}")
+last_disp_activity = 0
+last_serv_activity = 0
+serv_pid = 0
+disp_pid = 0 
 
+def server(shared_value, fifo_path, event, sdfifo):
+    global serv_pid
+    serv_pid = os.getpid()
+    print(f"Server process ID: {serv_pid}")
+    
+    
     #Ouverture du tube
     with open(fifo_path,'r') as fifo:
         while True:
 
+            global last_serv_activity
+            last_serv_activity = time.time()
             #lecture du tube
             data = fifo.read()
             if not data:
@@ -30,7 +40,26 @@ def server(shared_value, fifo_path, event, sdfifo):
             print(f"Server updated shared value to: {shared_value.value}")
             event.set()
 
+def watchdog():
+    print("Watchdog launched")
+    global serv_pid
+    global disp_pid
+    while True:
+        time.sleep(5)
+        current_time = time.time()
+        if current_time-last_serv_activity > 10:
+            print("Serveur inactif depuis 10 sec")
+            os.kill(serv_pid,0)
+        
+        if current_time-last_disp_activity > 10:
+            print("Dispatcher inactif depuis 10 sec")
+            os.kill(disp_pid,0)
+
 def dispatcher():
+
+    global disp_pid
+    disp_pid = os.getpid()
+
     try:
         nombre = int(input("Entrez un nombre\n"))
         print(f"Vous avez entré le nombre : {nombre}")
@@ -56,12 +85,19 @@ def dispatcher():
 
     # Créer le processus serveur
     server_process = multiprocessing.Process(target=server, args=(shared_value,fifo_path,event,sdfifo))
+
+    #Crée le processus Watchdog
+    watchdog_process = multiprocessing.Process(target=watchdog)
+    #lance le watchdog
+    watchdog_process.start()
     
     # Démarrer le serveur
     server_process.start()
     
 
     event.clear()
+    global last_disp_activity
+    last_disp_activity= time.time()
 
     with open(fifo_path, 'w') as fifo:
 
@@ -83,4 +119,6 @@ def dispatcher():
     os.remove(fifo_path)
 
 if __name__ == "__main__":
-    dispatcher()
+    while True:
+        dispatcher()
+        print("restarting disp")
